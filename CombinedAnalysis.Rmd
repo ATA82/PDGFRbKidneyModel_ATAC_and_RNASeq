@@ -1,0 +1,918 @@
+---
+title: 'Kramann - Kabgani: PDGFRb+ cells - Kidney Model - RNA-Seq'
+author:
+- affiliation: Interdisciplinary Center for Clinical Research - RWTH-Aachen
+  name: Ali T. Abdallah
+  fontsize: 15pt
+date: "01.06.2021"
+output: 
+  html_notebook:
+    highlight: kate
+    theme: paper
+---
+
+<style>
+.main-container{
+  min-width: 1200px;!important
+  margin-left: auto;!important
+  margin-right: auto;!important
+  font-size: 15px;!important
+}
+.tabset{
+  font-size: 15px;!important
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid black;
+}
+tr.sub th {
+    border-top-width: 1px;
+    border-top-style: solid;
+    border-top-color: #8ebffc;
+    font-weight: normal;
+    color: #333333;
+}
+.download{
+	padding: 10px 15px;
+	background: #4479BA;
+	color: #FFF;
+	-webkit-border-radius: 4px;
+	-moz-border-radius: 4px;
+	border-radius: 4px;
+	border: solid 1px #20538D;
+	text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4);
+	-webkit-box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 1px rgba(0, 0, 0, 0.2);
+	-moz-box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 1px rgba(0, 0, 0, 0.2);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 1px rgba(0, 0, 0, 0.2);
+	-webkit-transition-duration: 0.2s;
+	-moz-transition-duration: 0.2s;
+	transition-duration: 0.2s;
+	-webkit-user-select:none;
+	-moz-user-select:none;
+	-ms-user-select:none;
+	user-select:none;
+}
+.download:hover{
+	background: #356094;
+	border: solid 1px #2A4E77;
+	text-decoration: none;
+}
+.download:active{
+	-webkit-box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
+	-moz-box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
+	box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.6);
+	background: #2E5481;
+	border: solid 1px #203E5F;
+}
+h3{
+color: #800000;
+font-weight: bold;
+}
+h4{
+color: #000080;
+font-weight: bold;
+}
+h5{
+color: #008080;
+font-weight: bold
+}
+</style>
+
+
+## {.tabset .tabset-fade }
+
+```{r setup, echo=F}
+library("RColorBrewer")
+library(DESeq2)
+library(ggplot2)
+library(cowplot)
+library(ComplexHeatmap)
+concatenate <- function(Gene, Gene.Space=10, GeneClass=""){
+   return(paste(Gene, paste(rep(" ",Gene.Space-nchar(Gene)),collapse=" "),"",GeneClass,sep=""))
+}
+
+```
+
+
+<h3>Quality Control Plots</h3>
+
+### ATAC-Seq
+Here we very nicely see on both the PCA-plot and the Similarity heatmap precisely the expected behavior. Interestingly almost all effects of the treatment are explained by the PC1 (97% variance). On the other hand, the hierarchical clustering based on the euclidean distance between the samples' expression profiles reflects the expected behavior—a beneficial quality check.
+
+```{r fig.width=13, fig.height=6, echo=F}
+distances <- c("euclidean")
+grids <- vector("list", length(distances))
+
+for(d in 1:length(distances)){
+    vsd <- vst(DDS.atac, blind = F)
+    sampleDists <- dist(t(assay(vsd)), method = distances[d])
+    sampleDistMatrix <- as.matrix(sampleDists)
+    rownames(sampleDistMatrix) <- colnames(vsd)
+    colnames(sampleDistMatrix) <- colnames(vsd)
+    colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+    hm <- pheatmap::pheatmap(sampleDistMatrix,
+                             clustering_distance_rows=sampleDists, 
+                             clustering_distance_cols=sampleDists,
+                             col=colors)
+    hm <- ggplotify::as.ggplot(hm) 
+}
+
+pdf(file="Data/Images/QC.ATACSeq.pdf", width=13, height=6)
+cowplot::plot_grid(ggPCA + xlab("PC1: 97% variance") + ylab("PC2: 1% variance"),
+                   ggplot() + theme_void(), 
+                   hm + theme(plot.title = element_text(hjust = 0.5, face="bold"),
+                                                       plot.subtitle = element_text(hjust = 0.5)) + 
+                   ggtitle("Similarity Heat Map") + labs(subtitle="Euclidean distance on variance stabilized data"),
+                   rel_widths = c(1,.1,1), ncol=3)
+dev.off()
+cowplot::plot_grid(ggPCA + xlab("PC1: 97% variance") + ylab("PC2: 1% variance"),
+                   ggplot() + theme_void(), 
+                   hm + theme(plot.title = element_text(hjust = 0.5, face="bold"),
+                                                       plot.subtitle = element_text(hjust = 0.5)) + 
+                   ggtitle("Similarity Heat Map") + labs(subtitle="Euclidean distance on variance stabilized data"),
+                   rel_widths = c(1,.1,1), ncol=3)
+```
+### RNA-Seq (Raw)
+Sample TGFb_24h_R1 was sequenced deeper separated from the other samples. Therefore a lot of genes/transcripts are detected, which are not detected in the other samples. Consequently, it is popping up as an "outlier" in the similarity heatmap. In the PCA plot, you could see that the PC2 reflects the treatment effect, while the depth of sequencing/batch effect is mapped on the PC1. 
+
+```{r fig.width=13, fig.height=6, echo=F}
+pdf(file="Data/Images/QC.RNASeq.pdf", width=13, height=6)
+cowplot::plot_grid(gex.ggPCA[[1]],
+                                        ggplot() + theme_void(), 
+                                        gex.hm[[1]] + theme( plot.title = element_text(hjust = 0.5, face="bold"), 
+                                                        plot.subtitle = element_text(hjust = 0.5)) + 
+                                                        ggtitle("Similarity Heat Map") + 
+                                                        labs(subtitle="Euclidean distance on variance stabilized data"),
+                                        rel_widths = c(1,.1,1),
+                                        ncol=3)
+dev.off()
+cowplot::plot_grid(gex.ggPCA[[1]],
+                                        ggplot() + theme_void(), 
+                                        gex.hm[[1]] + theme( plot.title = element_text(hjust = 0.5, face="bold"), 
+                                                        plot.subtitle = element_text(hjust = 0.5)) + 
+                                                        ggtitle("Similarity Heat Map") + 
+                                                        labs(subtitle="Euclidean distance on variance stabilized data"),
+                                        rel_widths = c(1,.1,1),
+                                        ncol=3)
+```
+
+### RNA-Seq (Batch correction)
+
+After performing some batch correction, you could see that the depth of sequencing effect and the corresponding batch effect is largely removed. It seems, however, as if the batch correction is not specific enough, which is reflected by the similarity heatmap. However, on PC1, we now have a separation between the conditions. 
+
+```{r fig.width=13, fig.height=6, echo=F}
+pdf(file="Data/Images/QC.RNASeq.BatchCorrection.pdf", width=13, height=6)
+cowplot::plot_grid(  gex.ggPCA[[2]],
+                     ggplot() + theme_void(), 
+                     gex.hm[[2]] + theme( plot.title = element_text(hjust = 0.5, face="bold"), 
+                                          plot.subtitle = element_text(hjust = 0.5)) + 
+                                          ggtitle("Similarity Heat Map") + 
+                                          labs(subtitle="Euclidean distance on variance stabilized data"),
+                                          rel_widths = c(1,.1,1),
+                                          ncol=3)
+dev.off()
+cowplot::plot_grid(  gex.ggPCA[[2]],
+                     ggplot() + theme_void(), 
+                     gex.hm[[2]] + theme( plot.title = element_text(hjust = 0.5, face="bold"), 
+                                          plot.subtitle = element_text(hjust = 0.5)) + 
+                                          ggtitle("Similarity Heat Map") + 
+                                          labs(subtitle="Euclidean distance on variance stabilized data"),
+                                          rel_widths = c(1,.1,1),
+                                          ncol=3)
+```
+
+## {.tabset .tabset-fade }
+
+<h3>Correlation Plots</h3>
+
+```{r echo=F, fig.height=7, fig.width=21}
+corr_plot <- vector("list", 3)
+
+gex.vsd <- as.data.frame(assay(rlog(DDS.GEX, fitType = "local", blind=F)))
+gex.vsd$var <- matrixStats::rowVars(as.matrix(gex.vsd))
+gex.vsd <- gex.vsd[order(gex.vsd$var),]
+
+selected.genes_ids <- rownames(gex.vsd[1:50,])
+
+atac.vsd <- as.data.frame(assay(rlog(DDS.atac, fitType = "local", blind=F)))
+atac.vsd$var <- matrixStats::rowVars(as.matrix(atac.vsd))
+atac.vsd <- atac.vsd[order(atac.vsd$var),]
+
+selected.genes_ids.atac <- rownames(atac.vsd[1:50,])
+atac.vsd$var <- NULL
+gex.vsd$var <- NULL
+atac.vsd$atac_avg_0h <- (atac.vsd[,1]+atac.vsd[,2])/2
+atac.vsd$atac_avg_24h <- (atac.vsd[,3]+atac.vsd[,4])/2
+atac.vsd$atac_avg_72h <- (atac.vsd[,5]+atac.vsd[,6])/2
+gex.vsd$gex_avg_0h <- (gex.vsd[,1]+gex.vsd[,2])/2
+gex.vsd$gex_avg_24h <- (gex.vsd[,3]+gex.vsd[,4])/2
+gex.vsd$gex_avg_72h <- (gex.vsd[,5]+gex.vsd[,6])/2
+gex.vsd <- gex.vsd[,7:9]
+gex.vsd$input <- rownames(gex.vsd)
+atac.vsd <- atac.vsd[,7:9]
+atac.vsd$input <- rownames(atac.vsd)
+colnames(GENES[[1]]) <- c("Symbol", "input", "ensembl_gene_id")
+gex.vsd <- merge(gex.vsd, GENES[[1]], by="input")
+gex.vsd <- gex.vsd[,c(5,6,2:4)]
+atac.vsd <- merge(atac.vsd, GENES[[1]], by="input")
+atac.vsd <- atac.vsd[,c(5,6,2:4)]
+
+correlation <- merge(gex.vsd, atac.vsd, by=c("Symbol","ensembl_gene_id"))
+unloadNamespace("ggpubr")
+library(ggsignif)
+corr_plot[[1]] <- ggstatsplot::ggscatterstats(
+                                              data = correlation,
+                                              x = atac_avg_0h,
+                                              y = gex_avg_0h,
+                                              xlab = "ATAC - regularized logarithm of counts (0h)",
+                                              ylab = "GEX - regularized logarithm of counts (0h)",
+                                              title = "Correlation plot (0h)"
+                                            )
+corr_plot[[2]] <- ggstatsplot::ggscatterstats(
+                                              data = correlation,
+                                              x = atac_avg_24h,
+                                              y = gex_avg_24h,
+                                              xlab = "ATAC - regularized logarithm of counts (24h)",
+                                              ylab = "GEX - regularized logarithm of counts (24h)",
+                                              title = "Correlation plot (24h)"
+                                            )
+corr_plot[[3]] <- ggstatsplot::ggscatterstats(
+                                              data = (correlation),
+                                              x = atac_avg_72h,
+                                              y = gex_avg_72h,
+                                              xlab = "ATAC - regularized logarithm of counts (72h)",
+                                              ylab = "GEX - regularized logarithm of counts (72h)",
+                                              title = "Correlation plot (72h)"
+                                            )
+
+pdf(file = "Data/Images/corrplots.pdf", width=21, height=7)
+cowplot::plot_grid(corr_plot[[1]],corr_plot[[2]],corr_plot[[3]],ncol=3)
+dev.off()
+cowplot::plot_grid(corr_plot[[1]],corr_plot[[2]],corr_plot[[3]],ncol=3)
+
+```
+
+Here we show sample-wise correlation plots between GEX and ATAC information. On the y axis, we plot the average expression of each gene across replicates; on the x-axis, the average reads coverage of a gene around the TSS region (+/- 1KB). The blue line shows the fitting line. The correlation coefficient is computed using Pearson's method. The bar plot on the top side shows the distribution of the read coverage levels in the TSS region (+/- 1KB). The bar plot on the right side shows the distribution of the gene expression levels. Jointly the bar plots show that high gene expression generally corresponds to a high level of openness in chromatin. This fact is also reflected in Pearson's correlation coefficients.
+
+## {.tabset .tabset-fade }
+
+<h3>Heatmaps (Gene-Level)</h3>
+
+```{r echo=F}
+## Genes 
+GENES <- vector("list", length(pairs))
+Genes <- read.table("~/Desktop/work/RProjects/Data/Genes.HomoSapiens.gtf", sep="\t")
+Genes <- Genes[,9]
+Genes <- stringr::str_split(Genes, ";")
+Gene.Names <- vector("list", length(Genes))
+Gene.Ids <- vector("list", length(Genes))
+for(g in 1:length(Gene.Names)){
+  Gene.Names[[g]] <- stringr::str_trim(Genes[[g]][3])
+  Gene.Ids[[g]] <- stringr::str_trim(Genes[[g]][1])
+}
+Gene.Names <- unlist(Gene.Names)
+Gene.Names <- gsub(Gene.Names, pattern = "gene_name ", replacement = "")
+Gene.Ids <- unlist(Gene.Ids)
+Gene.Ids <- gsub(Gene.Ids, pattern = "gene_id ", replacement = "")
+names(Gene.Names) <- Gene.Ids
+```
+
+
+### Top 50 variable genes heatmap 
+```{r fig.width=16, fig.height=10, echo=F}
+
+
+## Normalize count data
+gex.vsd <- as.data.frame(assay(rlog(DDS.GEX, fitType = "local", blind=F)))
+atac.vsd <- as.data.frame(assay(rlog(DDS.atac, fitType = "local", blind=F)))
+
+### Gene Selection.
+selected_genes <- vector("list",4)
+for(i in 1:3){
+   selected_genes[[i]] <-  DDS.GEX.results[[i]]
+   selected_genes[[i]] <-  selected_genes[[i]][ selected_genes[[i]]$padj <= 0.05 &  selected_genes[[i]]$log2FoldChange >= 1,]
+   selected_genes[[i]] <-  selected_genes[[i]][order( selected_genes[[i]]$padj),]
+   selected_genes[[i]] <-  selected_genes[[i]][1:15,]
+   selected_genes[[i]] <-  selected_genes[[i]]$`Symbol (HGNC)`
+}
+i <- 4
+selected_genes[[i]] <- DDS.GEX.results[[i-1]]
+selected_genes[[i]] <-  selected_genes[[i]][ selected_genes[[i]]$padj <= 0.05 &  selected_genes[[i]]$log2FoldChange <= -1,]
+selected_genes[[i]] <-  selected_genes[[i]][order( selected_genes[[i]]$padj),]
+selected_genes[[i]] <-  selected_genes[[i]][1:15,]
+selected_genes[[i]] <-  selected_genes[[i]]$`Symbol (HGNC)`
+selected_genes <- unique(unlist(selected_genes))
+
+### Heatmap generation.
+assays <- vector("list", 2)
+assays[[1]] <- gex.vsd
+assays[[2]] <- atac.vsd
+heatmaps <- vector("list", length(assays))
+legends <- c(F,T)
+assay_titles <- c("GEX", "ATAC")
+hjust <- c(.47,.3)
+hm.gex.matrix <- vector("list", length(assays))
+for(k in 1:length(assays)){
+   GENES[[p]] <- Gene.Names #gprofiler2::gconvert(query = rownames(DDS.GEX.results[[p]]), organism = organism, target = target)
+   GENES[[p]] <- as.data.frame(GENES[[p]])
+   GENES[[p]]$input <- rownames(GENES[[p]])
+   colnames(GENES[[p]]) <- c("Symbol", "input")
+   gene_matrix <- as.data.frame(assays[[k]])
+   hm.gex.matrix[[k]] <- gene_matrix
+   hm.gex.matrix[[k]]$input <-rownames(hm.gex.matrix[[k]])
+   hm.gex.matrix[[k]] <- merge(hm.gex.matrix[[k]], GENES[[p]], by="input")
+   hm.gex.matrix[[k]] <- hm.gex.matrix[[k]][hm.gex.matrix[[k]]$Symbol %in% selected_genes, ]
+   rownames(hm.gex.matrix[[k]]) <- hm.gex.matrix[[k]]$Symbol
+   hm.gex.matrix[[k]] <- hm.gex.matrix[[k]][, 2:7]
+   hm.gex.matrix[[k]] <- as.data.frame((hm.gex.matrix[[k]]))
+   
+   annotation_col <- data.frame(SampleType = factor(c("TGFb_0h","TGFb_0h","TGFb_24h","TGFb_24h","TGFb_72h","TGFb_72h")),
+                                Treated    = factor(c("N", "N", "Y", "Y", "Y", "Y")))
+   rownames(annotation_col) <- colnames(as.data.frame(hm.gex.matrix[[k]]))
+   ann_colors <- list(SampleType = c(`TGFb_0h` = "darkgreen", `TGFb_24h`="red", `TGFb_72h`="orange"),
+                      Treated = c(N="lightgrey", Y="green"))
+   heatmaps[[k]] <- pheatmap::pheatmap(as.matrix(hm.gex.matrix[[k]]), main = "",
+                                       color = colorRampPalette(c("darkblue", "white", "red2"))(50), 
+                                       gaps_col = c(2,4),  border_color = "lightgrey", 
+                                       annotation_colors = ann_colors, cluster_rows=ifelse(k==1, T,F), 
+                                       annotation_col = annotation_col, show_rownames=T, show_colnames = F, 
+                                       cluster_cols=F, fontsize_row = 10, scale = "row", 
+                                       annotation_legend = legends[k], 
+                                       legend=legends[k]) 
+}
+
+library(dplyr)
+hm.gex.matrix[[1]]$id <- 1:nrow(hm.gex.matrix[[1]])
+x <- heatmaps[[1]]$tree_row[["order"]]
+hm.gex.matrix[[1]] <- hm.gex.matrix[[1]] %>% slice(match(x, id))
+hm.gex.matrix[[1]]$Symbol <- rownames(hm.gex.matrix[[1]])
+hm.gex.matrix[[2]]$Symbol <- rownames(hm.gex.matrix[[2]])
+hm.gex.matrix[[2]] <- merge(hm.gex.matrix[[1]], hm.gex.matrix[[2]], by="Symbol", all.x=T)
+hm.gex.matrix[[2]][is.na(hm.gex.matrix[[2]])] <- 0.01
+hm.gex.matrix[[2]] <- hm.gex.matrix[[2]][, c(1,8:14)]
+hm.gex.matrix[[2]] <- hm.gex.matrix[[2]] %>% slice(match(x, id))
+rownames(hm.gex.matrix[[2]]) <- hm.gex.matrix[[2]]$Symbol
+hm.gex.matrix[[1]]$Symbol <- NULL
+hm.gex.matrix[[1]]$id <- NULL
+hm.gex.matrix[[2]]$Symbol <- NULL
+hm.gex.matrix[[2]]$id <- NULL
+
+hjust <- c(.49,.325)
+for(k in 1:length(assays)){
+   annotation_col <- data.frame(SampleType = factor(c("TGFb_0h","TGFb_0h","TGFb_24h","TGFb_24h","TGFb_72h","TGFb_72h")),
+                                Treated = factor(c("N", "N", "Y", "Y", "Y", "Y")))
+   rownames(annotation_col) <- colnames(as.data.frame(hm.gex.matrix[[k]]))
+   ann_colors <-list(SampleType = c(`TGFb_0h` = "#003f5c", `TGFb_24h`="purple", `TGFb_72h`="#ffa600"),
+                      Treated = c(N="red", Y="green"))
+   heatmaps[[k]] <- pheatmap::pheatmap(as.matrix(hm.gex.matrix[[k]]), main = "", na_col="grey", 
+                                       color = colorRampPalette(c("darkblue", "white", "red2"))(50), 
+                                       gaps_col = c(2,4),  border_color = "lightgrey", 
+                                       annotation_colors = ann_colors, cluster_rows=ifelse(k==1, T,F), 
+                                       annotation_col = annotation_col, show_rownames=T, show_colnames = F, 
+                                       cluster_cols=F, fontsize_row = 10, scale = "row", 
+                                       annotation_legend = legends[k], 
+                                       legend=legends[k]) 
+  heatmaps[[k]] <-ggplotify::as.ggplot(heatmaps[[k]]) + ggtitle(assay_titles[k]) + theme(plot.title=element_text(hjust=hjust[k], face = "bold"))
+}
+
+top.gex.heatmaps <- plot_grid(heatmaps[[1]]+theme(legend.position="none"), heatmaps[[2]], ggplot()+theme_void(), rel_widths=c(1.35,1.6,.3), ncol=3)
+```
+
+
+```{r fig.width=16, fig.height=10, echo=F}
+library(DESeq2)
+library(cowplot)
+library(ggplot2)
+
+## Normalize count data
+gex.vsd <- as.data.frame(assay(rlog(DDS.GEX, fitType = "local", blind=F)))
+atac.vsd <- as.data.frame(assay(rlog(DDS.atac, fitType = "local", blind=F)))
+
+### Gene Selection
+DAG_GENES <- T
+if(DAG_GENES){ 
+   selected_genes <- vector("list",4)
+   for(i in 1:3){
+      selected_genes[[i]] <-  DDS.results[[i]]
+      selected_genes[[i]] <-  selected_genes[[i]][ selected_genes[[i]]$padj <= 0.05 &  selected_genes[[i]]$log2FoldChange >= 1,]
+      selected_genes[[i]] <-  selected_genes[[i]][order( selected_genes[[i]]$padj),]
+      selected_genes[[i]] <-  selected_genes[[i]][1:15,]
+      selected_genes[[i]] <-  selected_genes[[i]]$`Symbol (HGNC)`
+   }
+   i <- 4
+   selected_genes[[i]] <-  DDS.results[[i-1]]
+   selected_genes[[i]] <-  selected_genes[[i]][ selected_genes[[i]]$padj <= 0.05 &  selected_genes[[i]]$log2FoldChange <= -1,]
+   selected_genes[[i]] <-  selected_genes[[i]][order( selected_genes[[i]]$padj),]
+   selected_genes[[i]] <-  selected_genes[[i]][1:15,]
+   selected_genes[[i]] <-  selected_genes[[i]]$`Symbol (HGNC)`
+   selected_genes <- unique(unlist(selected_genes))
+} else {
+   
+   
+   
+}
+
+
+
+
+
+### Heatmap generation.
+assays <- vector("list", 2)
+assays[[1]] <- atac.vsd
+assays[[2]] <- gex.vsd
+heatmaps.atac <- vector("list", length(assays))
+legends <- c(F,T)
+assay_titles <- c("ATAC","GEX")
+hm.atac.matrix <- vector("list", length(assays))
+for(k in 1:length(assays)){
+   GENES[[p]] <- Gene.Names 
+   GENES[[p]] <- as.data.frame(GENES[[p]])
+   GENES[[p]]$input <- rownames(GENES[[p]])
+   colnames(GENES[[p]]) <- c("Symbol", "input")
+   gene_matrix <- as.data.frame(assays[[k]])
+   hm.atac.matrix[[k]] <- gene_matrix
+   hm.atac.matrix[[k]]$input <-rownames(hm.atac.matrix[[k]])
+   hm.atac.matrix[[k]] <- merge(hm.atac.matrix[[k]], GENES[[p]], by="input")
+   hm.atac.matrix[[k]] <- hm.atac.matrix[[k]][hm.atac.matrix[[k]]$Symbol %in% selected_genes, ]
+   rownames(hm.atac.matrix[[k]]) <- hm.atac.matrix[[k]]$Symbol
+   hm.atac.matrix[[k]] <- hm.atac.matrix[[k]][, 2:7]
+   hm.atac.matrix[[k]] <- as.data.frame((hm.atac.matrix[[k]]))
+   
+   annotation_col <- data.frame(SampleType = factor(c("TGFb_0h","TGFb_0h","TGFb_24h","TGFb_24h","TGFb_72h","TGFb_72h")),
+                               Treated = factor(c("N", "N", "Y", "Y", "Y", "Y")))
+   rownames(annotation_col) <- colnames(as.data.frame(hm.atac.matrix[[k]]))
+   ann_colors <- list(SampleType = c(`TGFb_0h` = "darkgreen", `TGFb_24h`="red", `TGFb_72h`="orange"),
+                     Treated = c(N="lightgrey", Y="green"))
+   heatmaps.atac[[k]] <- pheatmap::pheatmap(as.matrix(hm.atac.matrix[[k]]), main = "",
+                                       color = colorRampPalette(c("darkblue", "white", "red2"))(50), 
+                                       gaps_col = c(2,4),  border_color = "lightgrey", 
+                                       annotation_colors = ann_colors, cluster_rows=ifelse(k==1, T, F), 
+                                       annotation_col = annotation_col, show_rownames=T, show_colnames = F, 
+                                       cluster_cols=F, fontsize_row = 10, scale = "row", 
+                                       annotation_legend = legends[k], 
+                                       legend=legends[k]) 
+}
+
+library(dplyr)
+
+
+hm.atac.matrix[[1]]$id <- 1:nrow(hm.atac.matrix[[1]])
+x <- heatmaps.atac[[1]]$tree_row[["order"]]
+hm.atac.matrix[[1]] <- hm.atac.matrix[[1]] %>% slice(match(x, id))
+hm.atac.matrix[[1]]$Symbol <- rownames(hm.atac.matrix[[1]])
+hm.atac.matrix[[2]]$Symbol <- rownames(hm.atac.matrix[[2]])
+hm.atac.matrix[[2]] <- merge(hm.atac.matrix[[1]], hm.atac.matrix[[2]], by="Symbol", all.x=T)
+hm.atac.matrix[[2]][is.na(hm.atac.matrix[[2]])] <- 0.01
+hm.atac.matrix[[2]] <- hm.atac.matrix[[2]][, c(1,8:14)]
+hm.atac.matrix[[2]] <- hm.atac.matrix[[2]] %>% slice(match(x, id))
+rownames(hm.atac.matrix[[2]]) <- hm.atac.matrix[[2]]$Symbol
+hm.atac.matrix[[1]]$Symbol <- NULL
+hm.atac.matrix[[1]]$id <- NULL
+hm.atac.matrix[[2]]$Symbol <- NULL
+hm.atac.matrix[[2]]$id <- NULL
+
+hjust <- c(.48,.35)
+for(k in 1:length(assays)){
+   annotation_col <- data.frame(SampleType = factor(c("TGFB_0h","TGFB_0h","TGFB_24h","TGFB_24h","TGFB_72h","TGFB_72h")),
+                                Treated = factor(c("N", "N", "Y", "Y", "Y", "Y")))
+   rownames(annotation_col) <- colnames(as.data.frame(hm.atac.matrix[[k]]))
+   ann_colors <- list(SampleType = c(`TGFB_0h` = "#003f5c", `TGFB_24h`="purple", `TGFB_72h`="#ffa600"),
+                      Treated = c(N="red", Y="green"))
+   heatmaps.atac[[k]] <- pheatmap::pheatmap(as.matrix(hm.atac.matrix[[k]]), main = "", na_col="grey", 
+                                       color = colorRampPalette(c("darkblue", "white", "red2"))(50), 
+                                       gaps_col = c(2,4),  border_color = "lightgrey", 
+                                       annotation_colors = ann_colors, cluster_rows=ifelse(k==1, T,F), 
+                                       annotation_col = annotation_col, show_rownames=T, show_colnames = F, 
+                                       cluster_cols=F, fontsize_row = 10, scale = "row", 
+                                       annotation_legend = legends[k], 
+                                       legend=legends[k]) 
+  heatmaps.atac[[k]] <-ggplotify::as.ggplot(heatmaps.atac[[k]]) + ggtitle(assay_titles[k])
+}
+
+top.atac.heatmaps <- plot_grid(heatmaps.atac[[1]]+theme(legend.position="none"), heatmaps.atac[[2]], ggplot()+theme_void(), rel_widths=c(1.35,1.,.1), ncol=3)
+```
+
+```{r fig.width=14, fig.height=9, echo=F}
+library(cowplot)
+library(ggplot2)
+
+top.gex.heatmaps  <- plot_grid(heatmaps[[1]] + theme(plot.title = element_text(hjust = 0.48, face = "bold")) + theme(legend.position = "none"), 
+                               heatmaps[[2]] + theme(plot.title = element_text(hjust = 0.12, face = "bold")), ggplot() + theme_void(), rel_widths = c(1.35, 1.9, .3), ncol=3)
+title <- ggdraw() + draw_label("A. Top DEG Genes (RNA-Seq)", fontface = 'bold', x = 0, hjust = -0.5) + theme(plot.margin = margin(0, 0, 0, 7))
+top.gex.heatmaps <- plot_grid(title, top.gex.heatmaps, ncol = 1, rel_heights = c(0.1, 1))
+
+top.atac.heatmaps <- plot_grid(heatmaps.atac[[1]] + theme(plot.title = element_text(hjust = 0.46, face = "bold")) + theme(legend.position = "none"), 
+                               heatmaps.atac[[2]] + theme(plot.title = element_text(hjust = 0.12, face = "bold")), ggplot() + theme_void(), rel_widths = c(1.35, 1.9, .1), ncol=3)
+title <- ggdraw() + draw_label("B. Top DEA Genes (ATAC-Seq)", fontface = 'bold', x = 0, hjust = -0.5) + theme(plot.margin = margin(0, 0, 0, 7))
+top.atac.heatmaps <- plot_grid(title, top.atac.heatmaps, ncol = 1, rel_heights = c(0.1, 1))
+
+plot_grid(top.gex.heatmaps, plot_grid(top.atac.heatmaps, ggplot()+theme_void(), ncol=1, rel_heights = c(1,0.05)), rel_widths = c(1.05,1), ncol=2)
+
+icesTAF::mkdir("Data/Images")
+pdf(file="Data/Images/top50.heatmaps.pdf", width = 14, height = 9)
+plot_grid(top.gex.heatmaps, plot_grid(top.atac.heatmaps, ggplot()+theme_void(), ncol=1, rel_heights = c(1,0.2)), rel_widths = c(1.05,1), ncol=2)
+dev.off()
+plot_grid(top.gex.heatmaps, plot_grid(top.atac.heatmaps, ggplot()+theme_void(), ncol=1, rel_heights = c(1,0.2)), rel_widths = c(1.05,1), ncol=2)
+
+```
+
+<h5>Caption: Two heatmaps pairs.</h5> 
+<b>Left heatmap-pair:</b> after pooling the top 15 differentially expressed genes (DEG) of all comparisons (24h vs. 0h, 72 vs. 0h, 72 vs. 24h, and 24 vs. 72h), we perform hierarchical clustering of the genes based on their normalized expression values. The normalization is performed using the regularized logarithm as implemented by the DESeq2 package. Next, we present the results with a heatmap of the top genes with normalized expression values (left) and a corresponding heatmap showing the corresponding openness information from the ATAC-Seq assay. Grey cells correspond to genes with no detected ATAC-information. </br> 
+<b>Right heatmap-pair:</b> after pooling the top 15 differentially accessible genes (DEA) of all comparisons (24h vs. 0h, 72 vs. 0h, 72 vs. 24h, and 24 vs. 72h), we perform hierarchical clustering of the genes based on their normalized accessibility values from the ATAC-Seq assay. The normalization is performed using the regularized logarithm as implemented by the DESeq2 package. Next, we present the results with a heatmap of the top genes with normalized accessibility values (left) and a corresponding heatmap showing the corresponding expression information from the RNA-Seq assay. Grey cells correspond to genes with no detected gene expression information. </br>
+
+## {.tabset .tabset-fade }
+
+<h3>Heatmaps (GeneSet-Level)</h3>
+
+<h4>List of selected pathways</h4>
+### GEX Selected Pathways 
+
+```{r echo=F}
+selected.gex.pathways <- c( "REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION",
+                            "PID_INTEGRIN1_PATHWAY",
+                            "REACTOME_COLLAGEN_FORMATION",
+                            "REACTOME_COLLAGEN_BIOSYNTHESIS_AND_MODIFYING_ENZYMES",
+                            "REACTOME_ELASTIC_FIBRE_FORMATION",
+                            "PID_INTEGRIN3_PATHWAY",
+                            "NABA_MATRISOME",
+                            "REACTOME_INTERLEUKIN_4_AND_INTERLEUKIN_13_SIGNALING",
+                            "REACTOME_INTEGRIN_CELL_SURFACE_INTERACTIONS",
+                            "REACTOME_RUNX3_REGULATES_CDKN1A_TRANSCRIPTION",
+                            "REACTOME_TRANSCRIPTIONAL_REGULATION_BY_RUNX3",
+                            "NABA_COLLAGENS",
+                            "REACTOME_RUNX3_REGULATES_NOTCH_SIGNALING",
+                            "BIOCARTA_TGFB_PATHWAY",
+                            "REACTOME_FIBRONECTIN_MATRIX_FORMATION",
+                            "REACTOME_SIGNALING_BY_NOTCH1",
+                            "REACTOME_SIGNALING_BY_PDGF",
+                            "REACTOME_SIGNALING_BY_TGF_BETA_RECEPTOR_COMPLEX",
+                            "NABA_ECM_REGULATORS",
+                            "NABA_ECM_GLYCOPROTEINS")
+
+selected.gex.pathways <- gsub(pattern = "REACTOME_", "", selected.gex.pathways)
+selected.gex.pathways <- gsub(pattern = "PID_", "", selected.gex.pathways)
+selected.gex.pathways <- gsub(pattern = "NABA_", "", selected.gex.pathways)
+selected.gex.pathways <- gsub(pattern = "BIOCARTA_", "", selected.gex.pathways)
+as.data.frame(selected.gex.pathways)
+```
+
+### ATAC Selected Pathways 
+
+```{r echo=F}
+selected.atac.pathways <- c("REACTOME_RUNX3_REGULATES_YAP1_MEDIATED_TRANSCRIPTION",
+                            "REACTOME_SIGNALING_BY_NOTCH",
+                            "NOTCH1_INTRACELLULAR_DOMAIN_REGULATES_TRANSCRIPTION",
+                            "NOTCH_EXPRESSION_AND_PROCESSING",
+                            "PID_PDGFRB_PATHWAY",
+                            "SIGNALING_BY_TGF_BETA_RECEPTOR_COMPLEX",
+                            "WNT_SIGNALING",
+                            "MYC_PATHWAY",
+                            "TRANSCRIPTIONAL_ACTIVITY_OF_SMAD2_SMAD3_SMAD4_HETEROTRIMER",
+                            "SMAD2_SMAD3_SMAD4_HETEROTRIMER_REGULATES_TRANSCRIPTION",
+                            "NABA_MATRISOME",
+                            "NABA_MATRISOME_ASSOCIATED",
+                            "REACTOME_TRANSCRIPTIONAL_REGULATION_BY_RUNX1",
+                            "PID_PLK1_PATHWAY",
+                            "REACTOME_SEMA4D_INDUCED_CELL_MIGRATION_AND_GROWTH_CONE_COLLAPSE",
+                            "PID_PI3K_PLC_TRK_PATHWAY",
+                            "PID_ERBB1_DOWNSTREAM_PATHWAY",
+                            "PID_MAPK_TRK_PATHWAY",
+                            "REACTOME_TNF_SIGNALING",
+                            "REACTOME_SIGNALING_BY_TGF_BETA_FAMILY_MEMBERS")
+selected.atac.pathways <- gsub(pattern = "REACTOME_", "", selected.atac.pathways)
+selected.atac.pathways <- gsub(pattern = "PID_", "", selected.atac.pathways)
+selected.atac.pathways <- gsub(pattern = "NABA_", "", selected.atac.pathways)
+selected.atac.pathways <- gsub(pattern = "BIOCARTA_", "", selected.atac.pathways)
+as.data.frame(selected.atac.pathways)
+```
+
+```{r echo=F}
+go.tables <- vector("list", 4)
+for(p in 1:4){
+   if(p!=4){
+      go.table <- rbind(gex.go_tbl_c2.DT[[p]]$x$data, gex.go_tbl_go.DT[[p]]$x$data)
+   } else {
+      go.table <- rbind(gex.go_Dn_tbl_c2.DT[[3]]$x$data, gex.go_Dn_tbl_go.DT[[3]]$x$data)
+   }
+go.table$GeneSetName <- gsub(pattern = "http://www.gsea-msigdb.org/gsea/msigdb/cards/", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "REACTOME_", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "PID_", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "NABA_", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "BIOCARTA_", "", go.table$GeneSetName)
+go.table <- go.table[go.table$GeneSetName %in% selected.gex.pathways,]
+go.tables[[p]] <- go.table
+}
+```
+
+## {.tabset .tabset-fade }
+
+<h4>GEX: Geneset enrichment results of selected pathways</h4>
+### Pathways in GOA (24h vs. 0h)
+```{r echo=F}
+DT::datatable(as.data.frame(go.tables[[1]]), rownames = FALSE, filter = 'top', 
+                caption = Table_title, extensions = 'Buttons',
+                options = list(dom = 'Bfrtip', scrollX=T,                                                                                                                          
+                               buttons = list(list(extend='csv', title=table_name), 
+                                              list(extend='excel', filename=table_name),    
+                                              list(extend='pdf', filename=table_name)), 
+                               autoWidth = TRUE, pageLength = 10, 
+                               columnDefs = list(list(className = 'dt-left'))))
+```
+
+
+###  Pathways in GOA (72h vs. 0h)
+```{r echo=F}
+DT::datatable(as.data.frame(go.tables[[2]]), rownames = FALSE, filter = 'top', 
+                caption = Table_title, extensions = 'Buttons',
+                options = list(dom = 'Bfrtip', scrollX=T,                                                                                                                          
+                               buttons = list(list(extend='csv', title=table_name), 
+                                              list(extend='excel', filename=table_name),    
+                                              list(extend='pdf', filename=table_name)), 
+                               autoWidth = TRUE, pageLength = 10, 
+                               columnDefs = list(list(className = 'dt-left'))))
+```
+
+### Pathways in GOA (72h vs. 24h)
+```{r echo=F}
+DT::datatable(as.data.frame(go.tables[[3]]), rownames = FALSE, filter = 'top', 
+                caption = Table_title, extensions = 'Buttons',
+                options = list(dom = 'Bfrtip', scrollX=T,                                                                                                                          
+                               buttons = list(list(extend='csv', title=table_name), 
+                                              list(extend='excel', filename=table_name),    
+                                              list(extend='pdf', filename=table_name)), 
+                               autoWidth = TRUE, pageLength = 10, 
+                               columnDefs = list(list(className = 'dt-left'))))
+```
+
+
+```{r echo=F}
+atac.go.tables <- vector("list", 3)
+for(p in 1:4){
+      
+   if(p!=4){
+      go.table <- rbind(go_tbl_c2.DT[[p]]$x$data, go_tbl_go.DT[[p]]$x$data)
+   } else {
+      go.table <- rbind(go_tbl_c2_dn.DT[[3]]$x$data, gex.go_Dn_tbl_go.DT[[3]]$x$data)
+   }
+go.table$GeneSetName <- gsub(pattern = "http://www.gsea-msigdb.org/gsea/msigdb/cards/", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "REACTOME_", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "PID_", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "NABA_", "", go.table$GeneSetName)
+go.table$GeneSetName <- gsub(pattern = "BIOCARTA_", "", go.table$GeneSetName)
+go.table <- go.table[go.table$GeneSetName %in% selected.atac.pathways,]
+atac.go.tables[[p]] <- go.table
+}
+atac.go.tables
+
+
+```
+
+
+## {.tabset .tabset-fade }
+
+<h4>ATAC: Geneset enrichment results of selected pathways</h4>
+### Pathways in GOA (24h vs. 0h)
+```{r echo=F}
+DT::datatable(as.data.frame(atac.go.tables[[1]]), rownames = FALSE, filter = 'top', 
+                caption = Table_title, extensions = 'Buttons',
+                options = list(dom = 'Bfrtip', scrollX=T,                                                                                                                          
+                               buttons = list(list(extend='csv', title=table_name), 
+                                              list(extend='excel', filename=table_name),    
+                                              list(extend='pdf', filename=table_name)), 
+                               autoWidth = TRUE, pageLength = 10, 
+                               columnDefs = list(list(className = 'dt-left'))))
+```
+
+
+###  Pathways in GOA (72h vs. 0h)
+```{r echo=F}
+DT::datatable(as.data.frame(atac.go.tables[[2]]), rownames = FALSE, filter = 'top', 
+                caption = Table_title, extensions = 'Buttons',
+                options = list(dom = 'Bfrtip', scrollX=T,                                                                                                                          
+                               buttons = list(list(extend='csv', title=table_name), 
+                                              list(extend='excel', filename=table_name),    
+                                              list(extend='pdf', filename=table_name)), 
+                               autoWidth = TRUE, pageLength = 10, 
+                               columnDefs = list(list(className = 'dt-left'))))
+```
+
+### Pathways in GOA (72h vs. 24h)
+```{r echo=F}
+DT::datatable(as.data.frame(atac.go.tables[[3]]), rownames = FALSE, filter = 'top', 
+                caption = Table_title, extensions = 'Buttons',
+                options = list(dom = 'Bfrtip', scrollX=T,                                                                                                                          
+                               buttons = list(list(extend='csv', title=table_name), 
+                                              list(extend='excel', filename=table_name),    
+                                              list(extend='pdf', filename=table_name)), 
+                               autoWidth = TRUE, pageLength = 10, 
+                               columnDefs = list(list(className = 'dt-left'))))
+```
+
+## {.tabset .tabset-fade }
+
+<h4>GO heatmaps</h4>
+
+### RNA-Seq
+```{r echo=F}
+colors <- c("#000080","#4c3197","#795eae","#a28dc4","#c9bedb",
+               "#e3c4bc","#d29889","#bd6c5a","#a4402d","#880000",
+               "#008000","#4c973c","#78ad68","#a1c495","#c9dac2",
+               "#dcc5da","#c79ac3","#b170ac","#994396","#800080")
+
+colors <- c("#ff8800","#ff9d45","#ffb271","#ffc79b","#fcdcc5",
+               "#cadcc3","#a2c796","#7ab26a","#4e9d3e","#008800",
+               "#58508d","#766ea1","#958db4","#b3adc8","#d2cedc",
+               "#e8d1dd","#dfb2c9","#d492b6","#c972a3","#bc5090")
+```
+
+```{r echo=F}
+  go.heatmap <- function(go.table, DEG.Table, cond, treat, gs_colors, vsd){
+  
+
+  
+  ### Select genes from each pathway.
+  DE <- vector("list", nrow(curr.go.table))
+  lengths <- vector("list", nrow(curr.go.table))
+  for(p in 1:nrow(curr.go.table)){
+     DE[[p]] <- DEG.Table
+     DE[[p]] <- DE[[p]][DE[[p]]$`Symbol (HGNC)` %in% unlist(strsplit(curr.go.table[p,]$Intersection,",")), ]
+     DE[[p]] <- DE[[p]][order(DE[[p]]$padj),]
+     DE[[p]] <- DE[[p]][1:5,]
+     DE[[p]]$GeneClass <- ""
+     DE[[p]] <- na.omit(DE[[p]])
+     lengths[[p]] <- nrow(DE[[p]])
+     DE[[p]]$GeneClass <- rep(curr.go.table[p,]$GeneSetName, lengths[[p]])
+  }
+  DE_all <- do.call("rbind", DE)
+  DE_all <- DE_all[,c(1,2,ncol(DE_all))]
+
+  ### Reduce count matrix to selected genes.
+  gene_matrix <- vsd
+  hm.gex.matrix <- gene_matrix
+  hm.gex.matrix$ensembl_gene_id <-rownames(hm.gex.matrix)
+  hm.gex.matrix <- merge(hm.gex.matrix, DE_all, by="ensembl_gene_id")
+  rownames(hm.gex.matrix) <- 1:nrow(hm.gex.matrix)
+  hm.gex.matrix <- hm.gex.matrix[,2:7]
+  hm.gex.matrix <- as.data.frame((hm.gex.matrix))
+
+  ### Annotate columns of the heatmap.
+  annotation_col = data.frame(SampleType = factor(c(rep(cond[1],2), rep(cond[2],2), rep(cond[3],2))),
+                              Treated = factor(c(rep(treat[1],2), rep(treat[2],2), rep(treat[3],2))))
+  rownames(annotation_col) <- colnames(hm.gex.matrix)
+
+  ### Annotate rows of the heatmap.
+  annotation_row <- data.frame(GeneClass = factor(rep(curr.go.table$GeneSetName, unlist(lengths))))
+  annotation_row$GeneClass <- factor(annotation_row$GeneClass, levels = unique(DE_all$GeneClass))
+  rownames(annotation_row) = 1:nrow(annotation_row)
+
+  ### select colors for row annotation
+  
+  names(gs_colors) <- curr.go.table$GeneSetName
+  
+  ann_colors = list(SampleType = c("darkgreen","red", "orange"),
+                    Treated = c(N="lightgrey", Y="green"),
+                    GeneClass=gs_colors
+                    )
+  names(ann_colors$SampleType) <- cond
+  
+  lengths <- unlist(lengths)
+  gaps <- vector("list", length(lengths))
+  gaps[[1]] <- lengths[1]
+  for(l in 2:length(lengths)){ gaps[[l]] <- lengths[l] + gaps[[l-1]] }
+  gaps <- unlist(gaps)
+
+  names <- ifelse(endsWith(rownames(annotation_col), "R1"), "R1",
+                  ifelse(endsWith(rownames(annotation_col), "R2"), "R2", "R3"))
+
+  chm <- ComplexHeatmap::pheatmap(as.matrix(hm.gex.matrix), annotation_col = annotation_col, gaps_row = gaps, scale="row",
+                                  annotation_row = annotation_row, annotation_colors = ann_colors,  legend = F,
+                                  annotation_names_row = T, row_names_side="left", border_color = "lightgrey", labels_col = names,
+                                  labels_row = DE_all$`Symbol (HGNC)`,   cluster_rows = F, cluster_cols = T,
+                                  color = colorRampPalette(c("darkblue", "white", "red2"))(50))
+
+
+  ha = HeatmapAnnotation(
+      empty = anno_empty(border = FALSE, 
+                         height = unit(4, "mm")),
+                         foo = anno_block(gp = gpar(fill = 2:6),labels = c("0h", "24h", "72h"))
+  )
+
+  chm@left_annotation@anno_list$GeneClass@legend_param <- 
+    list(labels_gp = gpar(fontsize = 10), plot = F, title = "C2 pathways", nrow = NULL,  ncol = 1,
+         title_gp = gpar(fontsize = 10, fontface = "bold"), title_position = "topleft", color_bar = c("discrete"), 
+         grid_height = unit(4, "mm"), grid_width = unit(4, "mm"), grid_border = NULL, labels_gp = gpar(fontsize = 10), 
+         row_gap = unit(18, "mm"),  legend_height = NULL, legend_width = NULL, legend_direction = c("horizontal"))
+
+
+# + ggtitle("RNA-Seq: [24h vs. 0h] - TOP GENES IN SELECTED PATHWAYS")
+
+  gex.go.heatmap.1 <- ggplotify::as.ggplot(chm) + theme(plot.title = element_text(size=12, face = "bold", colour = "#000080", hjust=0.5))
+return(gex.go.heatmap.1)
+  }
+```
+
+
+```{r fig.width=14, fig.height=9, echo=F}
+  pair <- 1
+  cond <- c("TGFb_0h", "TGFb_24h", "TGFb_72h")
+  treat <- c("N", "Y", "Y")
+  DEG.Table <- DDS.GEX.results[[pair]]
+  
+  gs_colors <- colors[1:10]
+  curr.go.table <- na.omit(go.tables[[pair]][1:10,])
+  gex.go.heatmap.1 <- go.heatmap(go.table = curr.go.table, DEG.Table = DEG.Table, cond = cond, treat = treat, gs_colors=gs_colors, vsd=gex.vsd)
+  gs_colors <- colors[11:20]
+  curr.go.table <- na.omit(go.tables[[pair]][11:20,])
+  gex.go.heatmap.2 <- go.heatmap(go.table = curr.go.table, DEG.Table = DEG.Table, cond = cond, treat = treat, gs_colors=gs_colors, vsd=gex.vsd)
+  
+  icesTAF::mkdir("Data/Images")
+  pdf(file="Data/Images/gex.go.heatmap.pdf", width = 14, height = 9)
+  cowplot::plot_grid(gex.go.heatmap.1, ggplot()+theme_void(), plot_grid(gex.go.heatmap.2, ggplot()+theme_void(), rel_heights = c(1,0.15), ncol=1),rel_widths=c(0.875,0.075,0.8), ncol=3)
+  dev.off()
+  cowplot::plot_grid(gex.go.heatmap.1, ggplot()+theme_void(), plot_grid(gex.go.heatmap.2, ggplot()+theme_void(), rel_heights = c(1,0.15), ncol=1),rel_widths=c(0.875,0.075,0.8), ncol=3)
+```
+### ATAC-Seq
+```{r fig.width=17, fig.height=9, echo=F}
+  pair <- 1
+  cond <- c("TGFB_0h", "TGFB_24h", "TGFB_72h")
+  treat <- c("N", "Y", "Y")
+  DEG.Table <- DDS.results[[pair]]
+  atac.go.table.all <- do.call("rbind",list(atac.go.tables[[1]],atac.go.tables[[3]]))
+  
+  
+  gs_colors <- colors[1:10]
+  curr.go.table <- na.omit(atac.go.table.all[1:10,])
+  atac.go.heatmap.1 <- go.heatmap(go.table = curr.go.table, DEG.Table = DEG.Table, cond = cond, treat = treat, gs_colors=gs_colors, vsd=atac.vsd)
+  gs_colors <- colors[11:19]
+  curr.go.table <- na.omit(atac.go.table.all[(!atac.go.table.all$GeneSetName %in% atac.go.table.all[1:10,]$GeneSetName),])
+  atac.go.heatmap.2 <- go.heatmap(go.table = curr.go.table, DEG.Table = DEG.Table, cond = cond, treat = treat, gs_colors=gs_colors, vsd=atac.vsd)
+  
+  
+  icesTAF::mkdir("Data/Images")
+  pdf(file="Data/Images/atac.go.heatmap.pdf", width = 17, height = 9)
+  cowplot::plot_grid(atac.go.heatmap.1, ggplot()+theme_void(), plot_grid(atac.go.heatmap.2, ggplot()+theme_void(), rel_heights = c(1,0.15), ncol=1),rel_widths=c(0.875,0.075,0.8), ncol=3)
+  dev.off()
+  cowplot::plot_grid(atac.go.heatmap.1, ggplot()+theme_void(), plot_grid(atac.go.heatmap.2, ggplot()+theme_void(), rel_heights = c(1,0.15), ncol=1),rel_widths=c(0.875,0.075,0.8), ncol=3)
+
+```
+
+## {.tabset .tabset-fade }
+
+<h3>Barplots (GeneSet-Level)</h3>
+
+### RNA-Seq
+```{r fig.width=16, fig.height=6, echo=F}
+got <- vector("list", 3)
+comparisons <- c("24h_vs_0h", "72h_vs_0h", "72h_vs_24h") 
+for(i in 1:3){
+   got[[i]] <- go.tables[[i]]
+   got[[i]] <- got[[i]][,c("GeneSetName", "P_value")]
+   got[[i]]$comparison <- comparisons[[i]]
+}
+
+got <- do.call("rbind", got)
+
+got$comparison <- factor(got$comparison, levels = c("24h_vs_0h", "72h_vs_0h", "72h_vs_24h") )
+gex.barplot <- ggplot(got, aes(x=GeneSetName, y=-log10(P_value), fill=comparison)) + geom_col() + coord_flip() + ggpubr::theme_pubr() + theme(axis.text.y = element_text(size=10)) + scale_fill_manual(values=c("darkgreen", "orange", "red")) + ylab("-log10(p-value) [Enrichment significance]") + facet_wrap(~comparison)
+
+icesTAF::mkdir("Data/Images")
+pdf(file="Data/Images/barplot.rnaseq.pdf", width = 16, height = 6)
+gex.barplot
+dev.off()
+```
+
+### ATAC-Seq
+
+<h3>Barplots (GeneSet-Level)</h3>
+```{r fig.width=16, fig.height=6, echo=F}
+got <- vector("list", 3)
+comparisons <- c("24h_vs_0h", "72h_vs_0h", "72h_vs_24h") 
+for(i in 1:3){
+   got[[i]] <- atac.go.tables[[i]]
+   got[[i]] <- got[[i]][,c("GeneSetName", "P_value")]
+   got[[i]]$comparison <- comparisons[[i]]
+}
+
+got <- do.call("rbind", got)
+#got$log10pvalue <- ifelse(got$UP,-log10(got$P_value),log10(got$P_value))
+#got$ExtGenesetName <- ifelse(got$UP,paste(got$GeneSetName," [UP]",sep=""),paste(got$GeneSetName," [DN]",sep=""))
+
+got$comparison <- factor(got$comparison, levels = c("24h_vs_0h", "72h_vs_0h", "72h_vs_24h") )
+atac.barplot <- ggplot(got, aes(x=GeneSetName, y=-log10(got$P_value), fill=comparison)) + geom_col() + coord_flip() + ggpubr::theme_pubr() + theme(axis.text.y = element_text(size=10)) + scale_fill_manual(values=c("darkgreen", "orange", "red")) + ylab("-log10(p-value) [Enrichment significance]") + facet_wrap(~comparison)
+icesTAF::mkdir("Data/Images")
+
+pdf(file="Data/Images/barplot.atacseq.pdf", width = 16, height = 6)
+atac.barplot
+dev.off()
+```
+
+## {.tabset .tabset-fade }
+
+### SessionInfo
+```{r echo=F}
+sessionInfo()
+```
+
+
